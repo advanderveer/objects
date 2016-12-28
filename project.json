@@ -1,0 +1,9 @@
+{
+  "name": "objects",
+  "description": "append-only content-addressable object store on top of S3",
+  "memory": 128,
+  "runtime": "golang",
+  "timeout": 5,
+  "role": "arn:aws:iam::399106104436:role/objects_lambda_function",
+  "environment": {}
+}

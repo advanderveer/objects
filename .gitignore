@@ -27,5 +27,4 @@ secrets.env
 .terraform
 *.tfstate
 *.tfstate.backup
-vendor
 build.zip

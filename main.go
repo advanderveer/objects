@@ -11,9 +11,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
 
-	"github.com/nerdalize/rotor/rotor"
 	"github.com/smartystreets/go-aws-auth"
 )
 
@@ -227,23 +225,23 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
-	h := &Handler{
-		Client:       http.DefaultClient,
-		Host:         fmt.Sprintf("s3-%s.amazonaws.com", os.Getenv("AWS_REGION")),
-		Bucket:       os.Getenv("S3_BUCKET"),
-		MinChunkSize: 1 * 1024 * 1024, //1MiB
-		MaxChunkSize: 8 * 1024 * 1024, //8MiB
-		Creds: awsauth.Credentials{
-			AccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
-			SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
-			SecurityToken:   os.Getenv("AWS_SESSION_TOKEN"),
-		},
-	}
-
-	mux := http.NewServeMux()
-	mux.Handle("/objects/", h)
-
-	log.Printf("%+v", h)
-
-	log.Fatal(rotor.ServeHTTP(os.Stdin, os.Stdout, mux))
+	// h := &Handler{
+	// 	Client:       http.DefaultClient,
+	// 	Host:         fmt.Sprintf("s3-%s.amazonaws.com", os.Getenv("AWS_REGION")),
+	// 	Bucket:       os.Getenv("S3_BUCKET"),
+	// 	MinChunkSize: 1 * 1024 * 1024, //1MiB
+	// 	MaxChunkSize: 8 * 1024 * 1024, //8MiB
+	// 	Creds: awsauth.Credentials{
+	// 		AccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
+	// 		SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+	// 		SecurityToken:   os.Getenv("AWS_SESSION_TOKEN"),
+	// 	},
+	// }
+	//
+	// mux := http.NewServeMux()
+	// mux.Handle("/objects/", h)
+	//
+	// log.Printf("%+v", h)
+	//
+	// log.Fatal(rotor.ServeHTTP(os.Stdin, os.Stdout, mux))
 }

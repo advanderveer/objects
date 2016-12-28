@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/restic/chunker"
+	"github.com/advanderveer/chunker"
 )
 
 func liveAPIEndpoint(t *testing.T) string {
@@ -114,7 +114,7 @@ func randb(size int64) []byte {
 }
 
 func BenchmarkUpload(b *testing.B) {
-	size := int64(12 * 1024 * 1024)
+	size := int64(128 * 1024 * 1024)
 	data := randb(size)
 
 	//the following cant be larger then 6MiB: {"b":"$input.body"}
