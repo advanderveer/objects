@@ -1,0 +1,10 @@
+hash: 163d13a4b308f7094b60696d4d93c81bf57f0c91bd31c5d6da76f7baf27bc85b
+updated: 2016-12-28T12:09:27.401173851+01:00
+imports:
+- name: github.com/nerdalize/rotor
+  version: 5719420ca92a4820a2459d251bcba114c5d444d8
+  subpackages:
+  - rotor
+- name: github.com/smartystreets/go-aws-auth
+  version: 2043e6d0bb7e4c18464a7bba562acbe482e3cabd
+testImports: []

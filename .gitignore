@@ -22,3 +22,10 @@ _testmain.go
 *.exe
 *.test
 *.prof
+
+secrets.env
+.terraform
+*.tfstate
+*.tfstate.backup
+vendor
+build.zip
