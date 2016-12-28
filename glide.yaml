@@ -1,6 +1,10 @@
 package: github.com/advanderveer/objects
 import:
+- package: github.com/restic/chunker                #content-based chunking
+  version: bb2ecf9a98e35a0b336ffc23fc515fb6e7961577
 - package: github.com/nerdalize/rotor               #easy serverless http
   version: 5719420ca92a4820a2459d251bcba114c5d444d8
 - package: github.com/smartystreets/go-aws-auth     #sign aws http requests
   version: 2043e6d0bb7e4c18464a7bba562acbe482e3cabd
+- package: github.com/cheggaaa/pb                   #progress bars
+  version: d7e6ca3010b6f084d8056847f55d7f572f180678

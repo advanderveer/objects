@@ -1,10 +1,16 @@
-hash: 163d13a4b308f7094b60696d4d93c81bf57f0c91bd31c5d6da76f7baf27bc85b
-updated: 2016-12-28T12:09:27.401173851+01:00
+hash: 679b2de94efa739d904d77d8249fd6b3f508e78612aed4111f3bf201e6f08e81
+updated: 2016-12-28T19:53:34.98463461+01:00
 imports:
+- name: github.com/cheggaaa/pb
+  version: d7e6ca3010b6f084d8056847f55d7f572f180678
 - name: github.com/nerdalize/rotor
   version: 5719420ca92a4820a2459d251bcba114c5d444d8
   subpackages:
   - rotor
+- name: github.com/restic/chunker
+  version: bb2ecf9a98e35a0b336ffc23fc515fb6e7961577
 - name: github.com/smartystreets/go-aws-auth
   version: 2043e6d0bb7e4c18464a7bba562acbe482e3cabd
-testImports: []
+testImports:
+- name: github.com/mattn/go-runewidth
+  version: 737072b4e32b7a5018b4a7125da8d12de90e8045

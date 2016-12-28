@@ -3,13 +3,15 @@ package main
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/base64"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
-	"time"
 
 	"github.com/nerdalize/rotor/rotor"
 	"github.com/smartystreets/go-aws-auth"
@@ -36,15 +38,17 @@ func Has(client *http.Client, k []byte, host, bucket string, creds awsauth.Crede
 
 	if resp.StatusCode == http.StatusOK {
 		return true, nil
-	} else if resp.StatusCode == http.StatusNotFound {
+	} else if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
+		//AWS returns forbidden for a HEAD request if the one performing the operation does not have
+		//list bucket permissions
 		return false, nil
 	} else {
-		return false, fmt.Errorf("unexpected response from PUT '%s' request: %s", loc, resp.Status)
+		return false, fmt.Errorf("unexpected response from HEAD '%s' request: %s", loc, resp.Status)
 	}
 }
 
 //Get attempts to download chunk 'k' from an S3 object store
-func Get(client *http.Client, k []byte, host, bucket string, creds awsauth.Credentials) (chunk []byte, err error) {
+func Get(client *http.Client, k []byte, host, bucket string, creds awsauth.Credentials) (resp *http.Response, err error) {
 	raw := fmt.Sprintf("https://%s/%s/%x", host, bucket, k)
 	loc, err := url.Parse(raw)
 	if err != nil {
@@ -57,33 +61,23 @@ func Get(client *http.Client, k []byte, host, bucket string, creds awsauth.Crede
 	}
 
 	awsauth.Sign(req, creds)
-	resp, err := client.Do(req)
+	resp, err = client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to perform GET request: %v", err)
 	}
 
-	defer resp.Body.Close()
-	chunk, err = ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response body for %s: %v", resp.Status, err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("unexpected response from PUT '%s' request: %s, body: %v", loc, resp.Status, string(chunk))
-	}
-
-	return chunk, nil
+	return resp, nil
 }
 
 //Put uploads a chunk to an S3 object store under the provided key 'k'
-func Put(client *http.Client, k []byte, chunk []byte, host, bucket string, creds awsauth.Credentials) error {
+func Put(client *http.Client, k []byte, body io.Reader, host, bucket string, creds awsauth.Credentials) error {
 	raw := fmt.Sprintf("https://%s/%s/%x", host, bucket, k)
 	loc, err := url.Parse(raw)
 	if err != nil {
 		return fmt.Errorf("failed to parse '%s' as url: %v", raw, err)
 	}
 
-	req, err := http.NewRequest("PUT", loc.String(), bytes.NewBuffer(chunk))
+	req, err := http.NewRequest("PUT", loc.String(), body)
 	if err != nil {
 		return fmt.Errorf("failed to create PUT request: %v", err)
 	}
@@ -101,78 +95,155 @@ func Put(client *http.Client, k []byte, chunk []byte, host, bucket string, creds
 			return fmt.Errorf("failed to read response body for unexpected response: %s", resp.Status)
 		}
 
-		return fmt.Errorf("unexpected response from PUT '%s' request: %s, body: %v", loc, resp.Status, string(body))
+		return fmt.Errorf("unexpected response from PUT '%s' response: %s, body: %v", loc, resp.Status, string(body))
 	}
 
 	return nil
 }
 
-var (
-	region       = os.Getenv("AWS_REGION")
-	bucket       = os.Getenv("S3_BUCKET")
-	accessKey    = os.Getenv("AWS_ACCESS_KEY_ID")
-	secretKey    = os.Getenv("AWS_SECRET_ACCESS_KEY")
-	sessionToken = os.Getenv("AWS_SESSION_TOKEN")
-)
+//Handler is our simple http handler that can be tested in unit tests
+type Handler struct {
+	Host         string
+	Bucket       string
+	MaxChunkSize int64
+	MinChunkSize int64
+	Client       *http.Client
+	Creds        awsauth.Credentials
+}
 
-var handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	var (
-		host = fmt.Sprintf("s3-%s.amazonaws.com", region)
-		has  bool
-		err  error
-		data []byte
-	)
+func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Println(r.URL.Path)
 
-	start := time.Now()
-	if has, err = Has(
-		http.DefaultClient,
-		[]byte("my-key"),
-		host,
-		bucket,
-		awsauth.Credentials{
-			AccessKeyID:     accessKey,
-			SecretAccessKey: secretKey,
-			SecurityToken:   sessionToken,
-		}); err != nil {
-		fmt.Fprintf(w, "failed to has: %v", err)
+	switch r.Method {
+	//Get request are always attempts to fetch a certain
+	//chunk from the s3 store. Since s3 supports read-after-write
+	//consistency and put is append-only in our code we can always
+	//expect that a 404 from the store means the chunk is not present
+	case http.MethodGet:
+
+		//check path requirements for decoding
+		path := bytes.Trim([]byte(r.URL.Path), "/")
+		if len(path) != base64.URLEncoding.EncodedLen(sha256.Size) {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		//attempt to decode, on failure report 404
+		k := make([]byte, base64.URLEncoding.DecodedLen(len(path)))
+		n, err := base64.URLEncoding.Decode(k, path)
+		if err != nil || n != sha256.Size {
+			log.Printf("failed to decode '%x' (%s): (%d/%d) %v", path, r.URL.Path, n, sha256.Size, err)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		//pass on to s3
+		s3resp, err := Get(h.Client, k, h.Host, h.Bucket, h.Creds)
+		if err != nil {
+			log.Printf("failed to get chunk with key '%s': %v", r.URL.Path, err)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		//anything other then OK is reported as 404
+		if s3resp.StatusCode != http.StatusOK {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		//copy over s3 response
+		defer s3resp.Body.Close()
+		_, err = io.Copy(w, s3resp.Body)
+		if err != nil {
+			log.Printf("failed to copy s3 response to api response: %v", err)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		//Put request are not passed on directly, since we're having an append-only
+		//party with our content-based chunks we buffer the request body up to a
+		//certain size and hash it ourselves to determine the storage key.
+	case http.MethodPost:
+		hash := sha256.New()
+		buf := bytes.NewBuffer(nil)
+		mw := io.MultiWriter(buf, hash)
+
+		maxrc := http.MaxBytesReader(w, r.Body, h.MaxChunkSize)
+		defer maxrc.Close()
+
+		log.Println("copying", r.Header)
+		written, err := io.Copy(mw, maxrc)
+		if err != nil || written != int64(buf.Len()) {
+			log.Printf("failed to copy request body into memory: (%d/%d) %v", written, buf.Len(), err)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		log.Println("copied", r.Header)
+
+		//the limit reader went passed one byte passed the max size
+		//report as such to the api user
+		if written > int64(h.MaxChunkSize) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		//if the file is to too small we dont accept it, it may be an attempt to
+		//find cheap hash collisions
+		if written < int64(h.MinChunkSize) {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		//sha2 key (32 bytes)
+		k := hash.Sum(nil)
+
+		//check if the key is already stored
+		exists, err := Has(h.Client, k, h.Host, h.Bucket, h.Creds)
+		if err != nil {
+			log.Printf("failed to ask s3 for chunk existence: %v", err)
+			w.WriteHeader(http.StatusInternalServerError) //indicate to the user he cannot proceed as expected
+			return
+		} else if exists {
+			//chunk already exist, OK and encode key
+			fmt.Fprintln(w, base64.URLEncoding.EncodeToString(k))
+			return
+		}
+
+		//finally actually put the chunk
+		err = Put(h.Client, k, buf, h.Host, h.Bucket, h.Creds)
+		if err != nil {
+			log.Printf("failed to put chunk from memory onto s3: %v", err)
+			w.WriteHeader(http.StatusInternalServerError) //indicate to the user he cannot proceed as expected
+			return
+		}
+
+		//chunk already exist, OK and encode key
+		fmt.Fprintln(w, base64.URLEncoding.EncodeToString(k))
+		return
 	}
 
-	fmt.Fprintf(w, "has duration: %s, has: %v\n", time.Since(start), has)
-
-	start = time.Now()
-	if data, err = Get(
-		http.DefaultClient,
-		[]byte("my-key"),
-		host,
-		bucket,
-		awsauth.Credentials{
-			AccessKeyID:     accessKey,
-			SecretAccessKey: secretKey,
-			SecurityToken:   sessionToken,
-		}); err != nil {
-		fmt.Fprintf(w, "failed to get: %v", err)
-	}
-
-	fmt.Fprintf(w, "get duration: %s, data: %x\n", time.Since(start), data)
-
-	start = time.Now()
-	if err = Put(
-		http.DefaultClient,
-		[]byte("my-key"),
-		[]byte("my-data"),
-		host,
-		bucket,
-		awsauth.Credentials{
-			AccessKeyID:     accessKey,
-			SecretAccessKey: secretKey,
-			SecurityToken:   sessionToken,
-		}); err != nil {
-		fmt.Fprintf(w, "failed to put: %v", err)
-	}
-
-	fmt.Fprintf(w, "put duration: %s\n", time.Since(start))
-})
+	w.WriteHeader(http.StatusNotFound)
+}
 
 func main() {
-	log.Fatal(rotor.ServeHTTP(os.Stdin, os.Stdout, handler))
+	h := &Handler{
+		Client:       http.DefaultClient,
+		Host:         fmt.Sprintf("s3-%s.amazonaws.com", os.Getenv("AWS_REGION")),
+		Bucket:       os.Getenv("S3_BUCKET"),
+		MinChunkSize: 1 * 1024 * 1024, //1MiB
+		MaxChunkSize: 8 * 1024 * 1024, //8MiB
+		Creds: awsauth.Credentials{
+			AccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
+			SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+			SecurityToken:   os.Getenv("AWS_SESSION_TOKEN"),
+		},
+	}
+
+	mux := http.NewServeMux()
+	mux.Handle("/objects/", h)
+
+	log.Printf("%+v", h)
+
+	log.Fatal(rotor.ServeHTTP(os.Stdin, os.Stdout, mux))
 }

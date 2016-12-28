@@ -18,6 +18,7 @@ module "api" {
   source = "github.com/nerdalize/rotor//rotortf"
   aws_region = "${var.aws_region}"
 
+  func_timeout = "30"
   func_name = "objects-api"
   func_description = "append-only interface for s3 bucket '${aws_s3_bucket.objects.bucket}'"
   func_zip_path = "build.zip"
